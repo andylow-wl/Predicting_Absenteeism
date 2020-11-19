@@ -1,0 +1,490 @@
+## Reading Dataset ##
+
+mydata <-read.csv(file.choose(), header =TRUE) #THIS IS FOR TRAIN DATA
+
+## Removing Outliers 
+
+mydata <- as.data.frame(sapply(mydata, as.numeric))
+M <- mahalanobis(mydata[,c(6,8,9,10,11)],colMeans(mydata[,c(6,8,9,10,11)]),cov(mydata[,c(6,8,9,10,11)]))
+mydata <- mydata[(which(M<=10)),]
+smp_size <- floor(0.8 * nrow(mydata))
+
+## Splitting dataset into train and test data
+
+set.seed(123)
+train_ind <- sample(seq_len(nrow(mydata)), size = smp_size)
+trainset <-  mydata[train_ind, ]
+testset <- mydata[-train_ind, ]
+
+
+#############################################################################################################################################################################################
+
+## 4.2.2 Feature Selection using Hypothesis Testing(T-test and chisquare) ##
+
+set.seed(123)
+
+# t-test(for continuous variables)
+cont=c(1,6,7,8,9,10,11,14,17,18,19)
+for(i in cont){
+  print(t.test(mydata[,i],mydata$Absenteeism.time.in.hours)$p.value)
+}
+
+# chi-square test(for categorical variables)
+install.packages("MASS")
+library(MASS)
+cat= c(2,3,4,5,12,13,15,16)
+for(i in cat){
+  tbl=table(mydata$Absenteeism.time.in.hours,mydata[,i])
+  print(colnames(mydata[i]))
+  print(chisq.test(tbl)$p.value)
+}
+
+
+#############################################################################################################################################################################################
+
+## 4.2.3 Feature Selection using Information Gain ##
+
+install.packages("FSelector")
+library(FSelector)
+set.seed(123)
+information.gain(Absenteeism.time.in.hours~.,data=trainset)
+
+
+#############################################################################################################################################################################################
+
+## 4.3.1 Feature Selection using Stepwise Forward and Backward Selection ##
+
+set.seed(123)
+
+base.mod<-lm(Absenteeism.time.in.hours~1,data=mydata)
+
+all.mod<-lm(Absenteeism.time.in.hours~.,data=mydata)
+
+stepMod <- step(base.mod, scope=list(lower=base.mod,
+                                     upper=all.mod), direction="both", trace=0, steps=1000)
+forwardMod <- step(base.mod, scope=list(lower=base.mod,
+                                        upper=all.mod), direction="forward", trace=0, steps=1000)
+backwardMod <- step(all.mod, scope=list(lower=base.mod,
+                                        upper=all.mod), direction="backward", trace=0, steps=1000)
+
+vars_step <- names(unlist(stepMod[[1]]))
+vars_step <- shortlistedVars_step[!shortlistedVars_step %in%
+                                    "(Intercept)"] 
+vars_forward <- names(unlist(forwardMod[[1]]))
+vars_forward <- shortlistedVars_forward[!shortlistedVars_forward
+                                        %in% "(Intercept)"] 
+vars_backward <- names(unlist(backwardMod[[1]]))
+vars_backward <-
+  shortlistedVars_backward[!shortlistedVars_backward %in%
+                             "(Intercept)"] 
+print(vars_step)
+print(vars_forward)
+print(vars_backward)
+
+
+##############################################################################################################################################################################################
+
+## 4.3.2 Feature Selection using RFE ##
+
+library(caret)
+set.seed(123)
+control <- rfeControl(functions = rfFuncs, method = 'cv', number = 10, allowParallel = TRUE, verbose = TRUE)
+results <- rfe(mydata[,1:19], mydata$Absenteeism.time.in.hours, sizes = c(1:1), rfeControl = control)
+
+results
+
+
+#################################################################################################################################################################################################
+
+## 4.4.1 Feature Selection using LASSO ##
+
+library(glmnet)
+set.seed(123)
+feat_mod_select <- cv.glmnet(as.matrix(mydata[,1:19]) ,
+                             mydata[, 20], standardize = TRUE, alpha =1)
+as.matrix(round(coef(feat_mod_select,
+                     feat_mod_select$lambda.min),5))
+
+plot(feat_mod_select)
+
+
+#############################################################################################################################################################################################
+
+## 4.4.2 Feature Selection using Boruta ##
+
+library(Boruta)
+set.seed(123)
+
+boruta_output <- Boruta(Absenteeism.time.in.hours~.,data=na.omit(mydata),doTrace=0)
+
+names(boruta_output)
+
+boruta_signif<- getSelectedAttributes(boruta_output, withTentative = TRUE)
+print(boruta_signif)
+
+roughFixMod<- TentativeRoughFix(boruta_output)
+boruta_signif <- getSelectedAttributes(roughFixMod)
+print(boruta_signif)
+
+imps<-attStats(roughFixMod)
+imps2= imps[imps$decision!='Rejected', c('meanImp','decision')]
+head(imps2[order(-imps2$meanImp),])
+
+plot(boruta_output, cex.axis=7 , las=2, xlab="", main = "Variable Importance")
+
+
+#############################################################################################################################################################################################
+
+## 5.1 Plotting Linear Regression ##
+
+linearModel<-glm(mydata$Absenteeism.time.in.hours~.)
+summary(linearModel)
+
+
+#############################################################################################################################################################################################
+
+
+## 5.2.1 Plotting Support Vector Machine(SVM) ##
+
+library(e1071)
+library(Metrics)
+set.seed(123)
+
+model_svm_linear<-svm(Absenteeism.time.in.hours~.,data=trainset,type="C-classification",kernel="linear")
+pred_linear<-predict(model_svm_linear,testset)
+table(pred=pred_linear,actual=testset$Absenteeism.time.in.hours)
+auc(pred_linear,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_linear)
+
+model_svm_polynomial <-svm(Absenteeism.time.in.hours~.,data=trainset,type="C-classification",kernel="polynomial")
+pred_polynomial<-predict(model_svm_polynomial,testset)
+table(pred=pred_polynomial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_polynomial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_polynomial)
+
+model_svm_radial <-svm(Absenteeism.time.in.hours~.,data=trainset,type="C-classification",kernel= "radial")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+model_svm_sigmoid <-svm(Absenteeism.time.in.hours~.,data=trainset,type="C-classification",kernel= "sigmoid")
+pred_sigmoid<-predict(model_svm_sigmoid,testset)
+table(pred=pred_sigmoid,actual=testset$Absenteeism.time.in.hours)
+auc(pred_sigmoid,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_sigmoid)
+
+
+## SVM for hypothesis testing ##
+
+model_svm_polynomial <-svm(Absenteeism.time.in.hours~ID+Transportation.expense+Distance.from.Residence.to.Work+Service.time+Age+Work.load.Average.day+Hit.target+Son+Pet+Weight+Height+Reason.for.absence+Month.of.absence+Disciplinary.failure+Social.drinker+Seasons,data=trainset,type="C-classification",kernel="polynomial")
+pred_polynomial<-predict(model_svm_polynomial,testset)
+table(pred=pred_polynomial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_polynomial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_polynomial)
+
+
+
+model_svm_radial <-svm(Absenteeism.time.in.hours~ID+Transportation.expense+Distance.from.Residence.to.Work+Service.time+Age+Work.load.Average.day+Hit.target+Son+Pet+Weight+Height+Reason.for.absence+Month.of.absence+Disciplinary.failure+Social.drinker+Seasons,data=trainset,type="C-classification",kernel= "radial")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+
+# Sigmoid 
+model_svm_radial <-svm(Absenteeism.time.in.hours~ID+Transportation.expense+Distance.from.Residence.to.Work+Service.time+Age+Work.load.Average.day+Hit.target+Son+Pet+Weight+Height+Reason.for.absence+Month.of.absence+Disciplinary.failure+Social.drinker+Seasons,data=trainset,type="C-classification",kernel= "sigmoid")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+
+## SVM for Information Gain ##
+
+model_svm_polynomial <-svm(Absenteeism.time.in.hours~Transportation.expense+Disciplinary.failure+Reason.for.absence,data=trainset,type="C-classification",kernel="polynomial")
+pred_polynomial<-predict(model_svm_polynomial,testset)
+table(pred=pred_polynomial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_polynomial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_polynomial)
+
+
+model_svm_radial <-svm(Absenteeism.time.in.hours~Transportation.expense+Disciplinary.failure+Reason.for.absence,data=trainset,type="C-classification",kernel= "radial")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+# Sigmoid
+model_svm_radial <-svm(Absenteeism.time.in.hours~Transportation.expense+Disciplinary.failure+Reason.for.absence,data=trainset,type="C-classification",kernel= "sigmoid")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+ 
+## SVM for forward ##
+model_svm_polynomial <-svm(Absenteeism.time.in.hours~Height+Reason.for.absence+Disciplinary.failure+Son+Social.drinker+Day.of.the.week+Seasons,data=trainset,type="C-classification",kernel="polynomial")
+pred_polynomial<-predict(model_svm_polynomial,testset)
+table(pred=pred_polynomial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_polynomial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_polynomial)
+
+model_svm_radial <-svm(Absenteeism.time.in.hours~Height+Reason.for.absence+Disciplinary.failure+Son+Social.drinker+Day.of.the.week+Seasons,data=trainset,type="C-classification",kernel= "radial")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+# Sigmoid
+model_svm_radial <-svm(Absenteeism.time.in.hours~Height+Reason.for.absence+Disciplinary.failure+Son+Social.drinker+Day.of.the.week+Seasons,data=trainset,type="C-classification",kernel= "sigmoid")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial) 
+
+## SVM for backwards ##
+model_svm_polynomial <-svm(Absenteeism.time.in.hours~Height+Reason.for.absence+Disciplinary.failure+Son+Social.drinker+Day.of.the.week,data=trainset,type="C-classification",kernel="linear")
+pred_polynomial<-predict(model_svm_polynomial,testset)
+table(pred=pred_polynomial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_polynomial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_polynomial)
+
+model_svm_radial <-svm(Absenteeism.time.in.hours~Height+Reason.for.absence+Disciplinary.failure+Son+Social.drinker+Day.of.the.week,data=trainset,type="C-classification",kernel= "sigmoid")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+# Sigmoid 
+model_svm_radial <-svm(Absenteeism.time.in.hours~Height+Reason.for.absence+Disciplinary.failure+Son+Social.drinker+Day.of.the.week,data=trainset,type="C-classification",kernel= "sigmoid")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+
+## SVM for RFE ##
+
+model_svm_polynomial <-svm(Absenteeism.time.in.hours~Service.time+Disciplinary.failure+Reason.for.absence+Age+Pet+Height,data=trainset,type="C-classification",kernel="polynomial")
+pred_polynomial<-predict(model_svm_polynomial,testset)
+table(pred=pred_polynomial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_polynomial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_polynomial)
+
+
+model_svm_radial <-svm(Absenteeism.time.in.hours~Service.time+Disciplinary.failure+Reason.for.absence+Age+Pet+Height,data=trainset,type="C-classification",kernel= "radial")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+# Sigmoid 
+model_svm_radial <-svm(Absenteeism.time.in.hours~Service.time+Disciplinary.failure+Reason.for.absence+Age+Pet+Height,data=trainset,type="C-classification",kernel= "sigmoid")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+
+## SVM for LASSO ##
+
+model_svm_polynomial <-svm(Absenteeism.time.in.hours~ID+Reason.for.absence+Month.of.absence+Day.of.the.week+Seasons+Transportation.expense+Distance.from.Residence.to.Work+Age+Work.load.Average.day+Hit.target+Disciplinary.failure+Education+Son+Social.drinker+Pet+Height,data=trainset,type="C-classification",kernel="polynomial")
+pred_polynomial<-predict(model_svm_polynomial,testset)
+table(pred=pred_polynomial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_polynomial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_polynomial)
+
+
+model_svm_radial <-svm(Absenteeism.time.in.hours~ID+Reason.for.absence+Month.of.absence+Day.of.the.week+Seasons+Transportation.expense+Distance.from.Residence.to.Work+Age+Work.load.Average.day+Hit.target+Disciplinary.failure+Education+Son+Social.drinker+Pet+Height,data=trainset,type="C-classification",kernel= "radial")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+# Sigmoid
+model_svm_radial <-svm(Absenteeism.time.in.hours~ID+Reason.for.absence+Month.of.absence+Day.of.the.week+Seasons+Transportation.expense+Distance.from.Residence.to.Work+Age+Work.load.Average.day+Hit.target+Disciplinary.failure+Education+Son+Social.drinker+Pet+Height,data=trainset,type="C-classification",kernel= "sigmoid")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+
+## SVM for Boruta ##
+
+model_svm_polynomial <-svm(Absenteeism.time.in.hours~Reason.for.absence+Disciplinary.failure+Service.time+Age+Transportation.expense+Height,data=trainset,type="C-classification",kernel="polynomial")
+pred_polynomial<-predict(model_svm_polynomial,testset)
+table(pred=pred_polynomial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_polynomial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_polynomial)
+
+
+model_svm_radial <-svm(Absenteeism.time.in.hours~Reason.for.absence+Disciplinary.failure+Service.time+Age+Transportation.expense+Height,data=trainset,type="C-classification",kernel= "radial")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+# Sigmoid 
+model_svm_radial <-svm(Absenteeism.time.in.hours~Reason.for.absence+Disciplinary.failure+Service.time+Age+Transportation.expense+Height,data=trainset,type="C-classification",kernel= "sigmoid")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+
+## SVM for Random Forest ##
+
+model_svm_polynomial <-svm(Absenteeism.time.in.hours~Reason.for.absence+Disciplinary.failure,data=trainset,type="C-classification",kernel="polynomial")
+pred_polynomial<-predict(model_svm_polynomial,testset)
+table(pred=pred_polynomial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_polynomial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_polynomial)
+
+
+model_svm_radial <-svm(Absenteeism.time.in.hours~Reason.for.absence+Disciplinary.failure,data=trainset,type="C-classification",kernel= "radial")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+# Sigmoid
+model_svm_radial <-svm(Absenteeism.time.in.hours~Reason.for.absence+Disciplinary.failure,data=trainset,type="C-classification",kernel= "sigmoid")
+pred_radial<-predict(model_svm_radial,testset)
+table(pred=pred_radial,actual=testset$Absenteeism.time.in.hours)
+auc(pred_radial,testset$Absenteeism.time.in.hours)
+mean(testset$Absenteeism.time.in.hours==pred_radial)
+
+
+#################################################################################################################################################################################################
+
+
+## 5.3.1 Random Forest Model Evaluation ##
+
+library(randomForest)
+set.seed(123)
+
+# Feature Selection from Hypothesis Testing
+rf_hypotest <- randomForest(y=mydata[,20], x =mydata[,c(1,2,3,5,6,7,8,9,10,11,12,14,15,17,18,19)], ytest = test[,20], xtest = test[,c(1,2,3,5,6,7,8,9,10,11,12,14,15,17,18,19)], importance = TRUE)
+rf_hypotest
+
+# Feature Selection from Information Gain
+rf_infogain <- randomForest(y=mydata[,20], x =mydata[,c(2,6,12)], ytest = test[,20], xtest = test[,c(2,6,12)], importance = TRUE)
+rf_infogain
+
+# Feature Selection from Stepwise
+rf_stepwise <- randomForest(y=mydata[,20], x =mydata[,c(2,4,5,12,14,15,19)], ytest = test[,20], xtest = test[,c(2,4,5,12,14,15,19)], importance = TRUE)
+rf_stepwise
+
+# Feature Selection from RFE
+rf_rfe <- randomForest(y=mydata[,20], x =mydata[,c(2,5,8,12,19)], ytest = test[,20], xtest = test[,c(2,5,8,12,19)], importance = TRUE)
+rf_rfe
+
+# Feature Selection from LASSO
+rf_lasso <- randomForest(y=mydata[,20], x =mydata[,c(1,2,3,4,5,6,7,9,10,11,12,13,14,15,17,19)], ytest = test[,20], xtest = test[,c(1,2,3,4,5,6,7,9,10,11,12,13,14,15,17,19)], importance = TRUE)
+rf_lasso
+
+# Feature Selection from Boruta Algorithm
+rf_boruta <- randomForest(y=mydata[,20], x =mydata[,c(2,6,8,9,12,19)], ytest = test[,20], xtest = test[,c(2,6,8,9,12,19)], importance = TRUE)
+rf_boruta
+
+# Feature Selection from RF
+rf_rf <- randomForest(y=mydata[,20], x =mydata[,c(2,12)], ytest = test[,20], xtest = test[,c(2,12)], importance = TRUE)
+rf_rf
+
+
+###########################################################################################################################################################################################################
+
+## 5.4.1 Neural Network ##
+
+# Random sampling
+samplesize = 0.70 * nrow(data)
+set.seed(80)
+index = sample( seq_len ( nrow ( data ) ), size = samplesize )
+
+# Create training and test set
+datatrain = data[ index, ]
+datatest = data[ -index, ]
+
+max = apply(data , 2 , max)
+min = apply(data, 2 , min)
+scaled = as.data.frame(scale(data, center = min, scale = max - min))
+library(neuralnet)
+
+# creating training and test set
+trainNN = scaled[index , ]
+testNN = scaled[-index , ]
+
+
+set.seed(2)
+NN = neuralnet(Absenteeism.time.in.hours~ID+Transportation.expense+Distance.from.Residence.to.Work+Service.time+Age+Work.load.Average.day+Hit.target+Son+Pet+Weight+Reason.for.absence+Month.of.absence+Disciplinary.failure+Social.drinker+Seasons,trainNN, hidden = 2, linear.output = T )
+
+# plot neural network 
+plot(NN)
+
+predict_testNN = compute(NN, testNN[,c(1,6,7,8,9,10,11,14,17,18,19,2,3,12,15,5)])
+predict_testNN = (predict_testNN$net.result * (max(data$Absenteeism.time.in.hours) - min(data$Absenteeism.time.in.hours))) + min(data$Absenteeism.time.in.hours)
+predict_trainNN= compute(NN, trainNN[,c(1,6,7,8,9,10,11,14,17,18,19,2,3,12,15,5)])
+predict_trainNN = (predict_trainNN$net.result * (max(data$Absenteeism.time.in.hours) - min(data$Absenteeism.time.in.hours))) + min(data$Absenteeism.time.in.hours)
+
+
+
+plot(datatest$Absenteeism.time.in.hours, predict_testNN, col='red', pch=16, ylab = "predicted Absenteeism.time.in.hours NN", xlab = "real Absenteeism.time.in.hours", main="Test data")
+abline(0,1)
+plot(datatrain$Absenteeism.time.in.hours, predict_trainNN, col='blue', pch=16, ylab = "predicted Absenteeism.time.in.hours NN", xlab = "real Absenteeism.time.in.hours ",main="Train data")
+
+abline(0,1)
+
+# Calculate Root Mean Square Error (RMSE)
+RMSE.NN = (sum((datatest$Absenteeism.time.in.hours - predict_testNN)^2) / nrow(datatest)) ^ 0.5
+RMSE.NN
+
+RSME.train=(sum((datatrain$Absenteeism.time.in.hours - predict_trainNN)^2) / nrow(datatrain)) ^ 0.5
+RSME.train
+
+
+####################################################################################################################################################################################################
+
+## 5.51 Naive Bayes Classifier ##
+
+library(e1071)
+NBclassfier=naiveBayes(as.factor(Absenteeism.time.in.hours)~.,
+                       data=trainset)
+print(NBclassfier)
+printALL=function(model){
+  trainPred=predict(model, newdata = trainset, type = "class")
+  trainTable=table(trainset$Absenteeism.time.in.hours,
+                   trainPred)
+  testPred=predict(NBclassfier, newdata=testset, type="class")
+  testTable=table(testset$Absenteeism.time.in.hours, testPred)
+  trainAcc=(trainTable[1,1]+trainTable[2,2])/sum(trainTable)
+  testAcc=(testTable[1,1]+testTable[2,2])/sum(testTable)
+  message("Contingency Table for Training Data")
+  print(trainTable)
+  message("Contingency Table for Test Data")
+  print(testTable)
+  message("Accuracy")
+  print(round(cbind(trainAccuracy=trainAcc,
+                    testAccuracy=testAcc),3))
+}
+printALL(NBclassfier)
+
+
+#############################################################################################################################################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
